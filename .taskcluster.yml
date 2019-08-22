@@ -143,6 +143,9 @@ tasks:
         scopes:
           - secrets:get:project/relman/bugbug/integration
         payload:
+          features:
+            taskclusterProxy:
+              true
           maxRunTime: 3600
           image: python
           env:

@@ -146,7 +146,7 @@ tasks:
           maxRunTime: 3600
           image: python
           env:
-            TASKCLUSTER_SECRET: project/relman/bugbug/integration
+            TC_SECRET_ID: project/relman/bugbug/integration
           command:
             - "/bin/bash"
             - "-lcx"

@@ -147,7 +147,7 @@ tasks:
             taskclusterProxy:
               true
           maxRunTime: 3600
-          image: python
+          image: mozilla/bugbug-base:latest
           env:
             TC_SECRET_ID: project/relman/bugbug/integration
           command:

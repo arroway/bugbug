@@ -155,6 +155,7 @@ tasks:
                git -c advice.detachedHead=false checkout ${head_rev} &&
                pip install --quiet . &&
                pip install --quiet -r test-requirements.txt &&
+               env | grep TASK | cut -d "=" -f -1 &&
                bash ./scripts/integration_test.sh"
         metadata:
           name: bugbug integration test

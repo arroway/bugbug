@@ -57,7 +57,10 @@ class Trainer(object):
                 logger.info("Skipping download of the bug database")
 
         if issubclass(model_class, model.CommitModel):
-            self.download_db("commits")
+            if download_db:
+                self.download_db("commits")
+            else:
+                logger.info("Skipping download of the commit database")
 
         logger.info(f"Training *{model_name}* model")
 

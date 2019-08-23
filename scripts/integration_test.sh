@@ -21,7 +21,7 @@ mkdir -p cache
 bugbug-data-commits --limit 100 cache
 
 # Then train a bug model
-bugbug-train --limit 200 --no-download defectenhancementtask
+bugbug-train --limit 500 --no-download defectenhancementtask
 
 # Then train a commit model
 bugbug-train --limit 30000 --no-download backout
@@ -34,10 +34,10 @@ cd http_service/models;
 docker-compose build --build-arg CHECK_MODELS=0
 
 # Start the docker containers
-docker-compose up -d --force-recreate
+env BUGBUG_ALLOW_MISSING_MODELS=1 docker-compose up -d --force-recreate
 
 # Ensure we take down the containers at the end
 trap "docker-compose logs && docker-compose down" EXIT
 
 # Then check that we can correctly classify a bug
-sleep 5 && python ../tests/integration_test.py
+sleep 5 && python ../tests/test_integration.py

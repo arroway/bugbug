@@ -30,7 +30,7 @@ def integration_test():
 
     # Then try to classify a batch
     batch_url = f"{BUGBUG_HTTP_SERVER}/component/predict/batch"
-    bug_ids = ["1376535", "1376567"]
+    bug_ids = [1_376_535, 1_376_567]
     response = None
     for i in range(100):
         response = requests.post(
@@ -45,8 +45,8 @@ def integration_test():
     if not response:
         raise Exception("Couldn't get an answer in 100 seconds")
 
-    assert response.json()["1376535"]["class"] == "Core::DOM"
-    assert response.json()["1376567"]["class"] == "Core::Security: Process Sandboxing"
+    assert response.json()["bugs"]["1376535"]["class"] == "Toolkit::Places"
+    assert response.json()["bugs"]["1376567"]["class"] == "Toolkit::Crash Reporting"
 
 
 if __name__ == "__main__":

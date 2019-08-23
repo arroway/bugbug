@@ -16,6 +16,8 @@ from typing import Any, Dict, Tuple
 
 import matplotlib.dates as mdates
 import matplotlib.pyplot as plt
+import statsmodels.formula.api as smf
+from pandas import DataFrame
 
 LOGGER = logging.getLogger(__name__)
 
@@ -140,6 +142,26 @@ def analyze_metrics(metrics_directory: str, output_directory: str):
 
             metrics[model_name][f"{key}_mean"][date] = value["mean"]
             metrics[model_name][f"{key}_std"][date] = value["std"]
+
+    for model_name in metrics:
+        for metric_name, values in metrics[model_name].items():
+            print("M", model_name, metric_name)
+            df = DataFrame.from_dict(values, orient="index", columns=["value"])
+            df = df.sort_index()
+            df["days_since"] = (df.index - min(df.index)).astype("timedelta64[s]")
+            result = smf.ols("value ~ days_since", data=df).fit().params[0]
+
+            print("Result", result)
+            if result > 0:
+                print("Increasing")
+            elif result < 0:
+                print("Decreasing")
+            else:
+                print("Stable")
+
+            del df["days_since"]
+            df.plot()
+            plt.show()
 
     for model_name in metrics:
         for metric_name, values in metrics[model_name].items():

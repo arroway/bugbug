@@ -7,12 +7,11 @@ import os
 from logging import INFO, basicConfig, getLogger
 
 import hglib
-import zstandard
 from libmozdata.phabricator import PhabricatorAPI
 
 from bugbug import db, repository
 from bugbug.models.regressor import RegressorModel
-from bugbug.utils import download_check_etag, get_secret
+from bugbug.utils import download_check_etag, get_secret, zstd_decompress
 
 basicConfig(level=INFO)
 logger = getLogger(__name__)
@@ -29,10 +28,7 @@ class CommitClassifier(object):
 
         if not os.path.exists("regressormodel"):
             download_check_etag(URL, "regressormodel.zst")
-            dctx = zstandard.ZstdDecompressor()
-            with open("regressormodel.zst", "rb") as input_f:
-                with open("regressormodel", "wb") as output_f:
-                    dctx.copy_stream(input_f, output_f)
+            zstd_decompress("regressormodel")
             assert os.path.exists("regressormodel"), "Decompressed file exists"
 
         self.model = RegressorModel.load("regressormodel")
@@ -40,8 +36,7 @@ class CommitClassifier(object):
     def update_commit_db(self):
         repository.clone(self.repo_dir)
 
-        db.download_version(repository.COMMITS_DB)
-        if db.is_old_version(repository.COMMITS_DB) or not os.path.exists(
+        if db.is_old_version(repository.COMMITS_DB) or not db.exists(
             repository.COMMITS_DB
         ):
             db.download(repository.COMMITS_DB, force=True, support_files_too=True)
@@ -54,38 +49,63 @@ class CommitClassifier(object):
         repository.download_commits(self.repo_dir, rev_start)
 
     def apply_phab(self, hg, diff_id):
+        def has_revision(revision):
+            if not revision:
+                return False
+            try:
+                hg.identify(revision)
+                return True
+            except hglib.error.CommandError:
+                return False
+
         phabricator_api = PhabricatorAPI(
             api_key=get_secret("PHABRICATOR_TOKEN"), url=get_secret("PHABRICATOR_URL")
         )
 
-        diffs = phabricator_api.search_diffs(diff_id=diff_id)
-        assert len(diffs) == 1, "No diff available for {}".format(diff_id)
-        diff = diffs[0]
-
         # Get the stack of patches
-        base, patches = phabricator_api.load_patches_stack(hg, diff)
-        assert len(patches) > 0, "No patches to apply"
+        stack = phabricator_api.load_patches_stack(diff_id)
+        assert len(stack) > 0, "No patches to apply"
 
-        # Load all the diffs details with commits messages
-        diffs = phabricator_api.search_diffs(
-            diff_phid=[p[0] for p in patches], attachments={"commits": True}
-        )
-        commits = {
-            diff["phid"]: diff["attachments"]["commits"].get("commits", [])
+        # Find the first unknown base revision
+        needed_stack = []
+        revisions = {}
+        for patch in reversed(stack):
+            needed_stack.insert(0, patch)
+
+            # Stop as soon as a base revision is available
+            if has_revision(patch.base_revision):
+                logger.info(
+                    f"Stopping at diff {patch.id} and revision {patch.base_revision}"
+                )
+                break
+
+        if not needed_stack:
+            logger.info("All the patches are already applied")
+            return
+
+        # Load all the diffs revisions
+        diffs = phabricator_api.search_diffs(diff_phid=[p.phid for p in stack])
+        revisions = {
+            diff["phid"]: phabricator_api.load_revision(rev_phid=diff["revisionPHID"])
             for diff in diffs
         }
 
-        # First apply patches on local repo
-        for diff_phid, patch in patches:
-            commit = commits.get(diff_phid)
+        # Update repo to base revision
+        hg_base = needed_stack[0].base_revision
+        if hg_base:
+            hg.update(rev=hg_base, clean=True)
+            logger.info(f"Updated repo to {hg_base}")
 
-            message = ""
-            if commit:
-                message += "{}\n".format(commit[0]["message"])
+        for patch in needed_stack:
 
-            logger.info(f"Applying {diff_phid}")
+            if patch.commits:
+                message = patch.commits[0]["message"]
+            else:
+                message = revisions[patch.phid]["fields"]["title"]
+
+            logger.info(f"Applying {patch.phid}: {message}")
             hg.import_(
-                patches=io.BytesIO(patch.encode("utf-8")),
+                patches=io.BytesIO(patch.patch.encode("utf-8")),
                 message=message,
                 user="bugbug",
             )
@@ -100,29 +120,30 @@ class CommitClassifier(object):
 
             # Analyze patch.
             commits = repository.download_commits(
-                self.repo_dir, rev_start=patch_rev.decode("utf-8"), ret=True, save=False
+                self.repo_dir, rev_start=patch_rev.decode("utf-8"), save=False
             )
 
         probs, importance = self.model.classify(
             commits[-1], probabilities=True, importances=True
         )
 
-        feature_names = self.model.get_feature_names()
-
         features = []
         for i, (val, feature_index, is_positive) in enumerate(
-            importance["importances"]
+            importance["importances"]["classes"][1][0]
         ):
             features.append(
                 [
                     i + 1,
-                    feature_names[int(feature_index)],
-                    f'({"+" if (is_positive) else "-"}{val})',
+                    importance["feature_legend"][str(i + 1)],
+                    f'{"+" if (is_positive) else "-"}{val}',
                 ]
             )
 
         with open("probs.json", "w") as f:
             json.dump(probs[0].tolist(), f)
+
+        with open("importances.json", "w") as f:
+            json.dump(features, f)
 
         with open("importance.html", "w") as f:
             f.write(importance["html"])

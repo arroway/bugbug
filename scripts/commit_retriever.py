@@ -4,9 +4,8 @@ import argparse
 import os
 from logging import INFO, basicConfig, getLogger
 
-import zstandard
-
 from bugbug import db, repository
+from bugbug.utils import zstd_compress
 
 basicConfig(level=INFO)
 logger = getLogger(__name__)
@@ -19,10 +18,9 @@ class Retriever(object):
         assert os.path.isdir(cache_root), f"Cache root {cache_root} is not a dir."
         self.repo_dir = os.path.join(cache_root, "mozilla-central")
 
-    def retrieve_commits(self, limit=None):
+    def retrieve_commits(self):
         repository.clone(self.repo_dir)
 
-        db.download_version(repository.COMMITS_DB)
         if not db.is_old_version(repository.COMMITS_DB):
             db.download(repository.COMMITS_DB, support_files_too=True)
 
@@ -33,18 +31,12 @@ class Retriever(object):
         else:
             rev_start = 0
 
-        repository.download_commits(self.repo_dir, rev_start, limit=limit)
+        repository.download_commits(self.repo_dir, rev_start)
 
         logger.info("commit data extracted from repository")
 
-        self.compress_file("data/commits.json")
-        self.compress_file("data/commit_experiences.pickle")
-
-    def compress_file(self, path):
-        cctx = zstandard.ZstdCompressor()
-        with open(path, "rb") as input_f:
-            with open(f"{path}.zst", "wb") as output_f:
-                cctx.copy_stream(input_f, output_f)
+        zstd_compress("data/commits.json")
+        zstd_compress("data/commit_experiences.pickle")
 
 
 def main():
@@ -55,11 +47,11 @@ def main():
         "--limit",
         type=int,
         help="Only download the N oldest commits, used mainly for integration tests",
-    )
+    )  # TODO: Use limit
     parser.add_argument("cache-root", help="Cache for repository clones.")
 
     args = parser.parse_args()
 
     retriever = Retriever(getattr(args, "cache-root"))
 
-    retriever.retrieve_commits(args.limit)
+    retriever.retrieve_commits()

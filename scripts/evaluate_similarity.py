@@ -8,7 +8,7 @@ import sys
 
 from sklearn.feature_extraction.text import TfidfVectorizer
 
-from bugbug.similarity import LSISimilarity, NeighborsSimilarity
+from bugbug import similarity
 
 
 def parse_args(args):
@@ -16,18 +16,35 @@ def parse_args(args):
     parser.add_argument(
         "--algorithm",
         help="Similarity algorithm to use",
-        choices=["lsi", "neighbors_tfidf", "neighbors_tfidf_bigrams"],
+        choices=similarity.model_name_to_class.keys(),
+    )
+    parser.add_argument(
+        "--disable-url-cleanup",
+        help="Don't cleanup urls when training the similarity model",
+        dest="cleanup_urls",
+        default=True,
+        action="store_false",
+    )
+    parser.add_argument(
+        "--nltk_tokenizer",
+        help="Use nltk's tokenizer for text preprocessing",
+        dest="nltk_tokenizer",
+        default=False,
     )
     return parser.parse_args(args)
 
 
 def main(args):
-    if args.algorithm == "lsi":
-        model = LSISimilarity()
-    elif args.algorithm == "neighbors_tfidf":
-        model = NeighborsSimilarity()
-    elif args.algorithm == "neighbors_tfidf_bigrams":
-        model = NeighborsSimilarity(vectorizer=TfidfVectorizer(ngram_range=(1, 2)))
+    if args.algorithm == "neighbors_tfidf_bigrams":
+        model = similarity.model_name_to_class[args.algorithm](
+            vectorizer=TfidfVectorizer(ngram_range=(1, 2)),
+            cleanup_urls=args.cleanup_urls,
+            nltk_tokenizer=args.nltk_tokenizer,
+        )
+    else:
+        model = similarity.model_name_to_class[args.algorithm](
+            cleanup_urls=args.cleanup_urls, nltk_tokenizer=args.nltk_tokenizer
+        )
 
     model.evaluation()
 

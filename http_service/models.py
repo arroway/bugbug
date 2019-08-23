@@ -9,11 +9,11 @@ import os
 from urllib.request import urlretrieve
 
 import requests
-import zstandard
 from redis import Redis
 
 from bugbug import bugzilla, get_bugbug_version
 from bugbug.models import load_model
+from bugbug.utils import zstd_decompress
 
 logging.basicConfig(level=logging.INFO)
 LOGGER = logging.getLogger()
@@ -25,6 +25,14 @@ DEFAULT_EXPIRATION_TTL = 7 * 24 * 3600  # A week
 
 
 MODEL_CACHE = {}
+
+
+def result_key(model_name, bug_id):
+    return f"result_{model_name}_{bug_id}"
+
+
+def change_time_key(model_name, bug_id):
+    return f"bugbug:change_time_{model_name}_{bug_id}"
 
 
 def get_model(model_name):
@@ -67,11 +75,8 @@ def retrieve_model(name):
         LOGGER.info(f"Downloading the model from {model_url}")
         urlretrieve(model_url, f"{file_path}.zst")
 
-        dctx = zstandard.ZstdDecompressor()
-        with open(f"{file_path}.zst", "rb") as input_f:
-            with open(file_path, "wb") as output_f:
-                dctx.copy_stream(input_f, output_f)
-                LOGGER.info(f"Written model in {file_path}")
+        zstd_decompress(file_path)
+        LOGGER.info(f"Written model in {file_path}")
 
         with open(f"{file_path}.etag", "w") as f:
             f.write(new_etag)
@@ -131,9 +136,13 @@ def classify_bug(
 
         encoded_data = json.dumps(data)
 
-        redis_key = f"result_{model_name}_{bug_id}"
+        redis_key = result_key(model_name, bug_id)
 
         redis.set(redis_key, encoded_data)
         redis.expire(redis_key, expiration)
+
+        # Save the bug last change
+        change_key = change_time_key(model_name, bug_id)
+        redis.set(change_key, bugs[bug_id]["last_change_time"])
 
     return "OK"

@@ -16,6 +16,7 @@ import requests
 import zstandard
 
 from bugbug import utils
+from bugbug.utils import zstd_decompress
 
 DATABASES = {}
 
@@ -26,18 +27,26 @@ def register(path, url, version, support_files=[]):
     DATABASES[path] = {"url": url, "version": version, "support_files": support_files}
 
     # Create DB parent directory.
-    parent_dir = os.path.dirname(path)
-    if not os.path.exists(parent_dir):
-        os.makedirs(parent_dir, exist_ok=True)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
 
     if not os.path.exists(f"{path}.version"):
         with open(f"{path}.version", "w") as f:
             f.write(str(version))
 
 
+def exists(path):
+    return os.path.exists(path)
+
+
 def is_old_version(path):
-    with open(f"{path}.version", "r") as f:
-        prev_version = int(f.read())
+    r = requests.get(
+        urljoin(DATABASES[path]["url"], f"{os.path.basename(path)}.version")
+    )
+    if not r.ok:
+        print(f"Version file is not yet available to download for {path}")
+        return True
+
+    prev_version = int(r.text)
 
     return DATABASES[path]["version"] > prev_version
 
@@ -45,13 +54,10 @@ def is_old_version(path):
 def extract_file(path):
     path, compression_type = os.path.splitext(path)
 
-    with open(path, "wb") as output_f:
-        if compression_type == ".zst":
-            dctx = zstandard.ZstdDecompressor()
-            with open(f"{path}.zst", "rb") as input_f:
-                dctx.copy_stream(input_f, output_f)
-        else:
-            assert False, f"Unexpected compression type: {compression_type}"
+    if compression_type == ".zst":
+        zstd_decompress(path)
+    else:
+        assert False, f"Unexpected compression type: {compression_type}"
 
 
 def download_support_file(path, file_name):
@@ -66,10 +72,6 @@ def download_support_file(path, file_name):
             extract_file(path)
     except requests.exceptions.HTTPError:
         logger.exception(f"{file_name} is not yet available to download for {path}")
-
-
-def download_version(path):
-    download_support_file(path, f"{os.path.basename(path)}.version")
 
 
 # Download and extract databases.

@@ -43,11 +43,11 @@ tasks:
                cd bugbug &&
                git -c advice.detachedHead=false checkout ${head_rev} &&
                pip install --quiet -r test-requirements.txt &&
-               pre-commit run -a" # TODO Be smarter and run only on modified files
+               pre-commit run -a"
         metadata:
           name: bugbug lint
           description: bugbug lint
-          owner: ${user}@users.noreply.github.com
+          owner: mcastelluccio@mozilla.com
           source: ${repository}/raw/${head_rev}/.taskcluster.yml
 
       - $if: 'tasks_for == "github-push"'
@@ -70,7 +70,7 @@ tasks:
           metadata:
             name: bugbug tag version check
             description: bugbug tag version check
-            owner: ${user}@users.noreply.github.com
+            owner: mcastelluccio@mozilla.com
             source: ${repository}/raw/${head_rev}/.taskcluster.yml
 
       - taskId: {$eval: as_slugid("tests_task")}
@@ -88,7 +88,7 @@ tasks:
             - "-lcx"
             - "apt-get -qq update &&
                apt-get -qq install -y python-pip &&
-               python2 -m pip install --quiet mercurial==4.8 &&
+               python2 -m pip install --quiet mercurial==5.1 &&
                git clone --quiet https://github.com/mozilla/version-control-tools.git &&
                git clone --quiet ${repository} &&
                cd bugbug &&
@@ -97,14 +97,43 @@ tasks:
                pip install --quiet -r requirements.txt &&
                pip install --quiet -r extra-nlp-requirements.txt &&
                pip install --quiet -r extra-nn-requirements.txt &&
-               pip install --quiet -r infra/spawn_data_pipeline_requirements.txt &&
+               pip install --quiet -r infra/spawn_pipeline_requirements.txt &&
                pip install --quiet -r test-requirements.txt &&
                python -m pytest --cov=./ tests/test_*.py &&
                bash <(curl -s https://codecov.io/bash)"
         metadata:
           name: bugbug tests
           description: bugbug tests
-          owner: ${user}@users.noreply.github.com
+          owner: mcastelluccio@mozilla.com
+          source: ${repository}/raw/${head_rev}/.taskcluster.yml
+
+      - taskId: {$eval: as_slugid("http_tests_task")}
+        created: {$fromNow: ''}
+        deadline: {$fromNow: '1 hour'}
+        provisionerId: aws-provisioner-v1
+        workerType: github-worker
+        payload:
+          maxRunTime: 3600
+          image: python
+          env:
+            CODECOV_TOKEN: 66162f89-a4d9-420c-84bd-d10f12a428d9
+          command:
+            - "/bin/bash"
+            - "-lcx"
+            - "apt-get -qq update &&
+               apt-get -qq install -y python-pip &&
+               git clone --quiet ${repository} &&
+               cd bugbug &&
+               git -c advice.detachedHead=false checkout ${head_rev} &&
+               pip install --quiet . &&
+               pip install --quiet -r test-requirements.txt &&
+               pip install --quiet -r http_service/requirements.txt &&
+               pytest --cov=http_service http_service/tests/ -vvv &&
+               bash <(curl -s https://codecov.io/bash)"
+        metadata:
+          name: bugbug http service tests
+          description: bugbug http service tests
+          owner: mcastelluccio@mozilla.com
           source: ${repository}/raw/${head_rev}/.taskcluster.yml
 
       - taskId: {$eval: as_slugid("packaging_test_task")}
@@ -132,7 +161,7 @@ tasks:
         metadata:
           name: bugbug packaging test
           description: bugbug packaging test
-          owner: ${user}@users.noreply.github.com
+          owner: mcastelluccio@mozilla.com
           source: ${repository}/raw/${head_rev}/.taskcluster.yml
 
       - taskId: {$eval: as_slugid("integration_test")}
@@ -170,7 +199,7 @@ tasks:
         created: {$fromNow: ''}
         deadline: {$fromNow: '3 hours'}
         provisionerId: aws-provisioner-v1
-        workerType: releng-svc
+        workerType: relman-svc
         payload:
           capabilities:
             privileged: true
@@ -202,7 +231,7 @@ tasks:
         metadata:
           name: bugbug docker build
           description: bugbug docker build
-          owner: ${user}@users.noreply.github.com
+          owner: mcastelluccio@mozilla.com
           source: ${repository}/raw/${head_rev}/.taskcluster.yml
 
       - $if: 'tasks_for == "github-push" && head_branch[:10] == "refs/tags/"'
@@ -210,6 +239,7 @@ tasks:
           dependencies:
             - {$eval: as_slugid("lint_task")}
             - {$eval: as_slugid("tests_task")}
+            - {$eval: as_slugid("http_tests_task")}
             - {$eval: as_slugid("packaging_test_task")}
             - {$eval: as_slugid("version_check_task")}
           scopes:
@@ -236,7 +266,7 @@ tasks:
           metadata:
             name: bugbug PyPI release
             description: bugbug PyPI release
-            owner: ${user}@users.noreply.github.com
+            owner: mcastelluccio@mozilla.com
             source: ${repository}/raw/${head_rev}/.taskcluster.yml
 
       - $if: 'tasks_for == "github-push" && head_branch[:10] == "refs/tags/"'
@@ -270,7 +300,7 @@ tasks:
           metadata:
             name: bugbug docker push
             description: bugbug docker push
-            owner: ${user}@users.noreply.github.com
+            owner: mcastelluccio@mozilla.com
             source: ${repository}/raw/${head_rev}/.taskcluster.yml
 
       - $if: 'tasks_for == "github-push" && head_branch[:10] == "refs/tags/"'
@@ -304,7 +334,7 @@ tasks:
           metadata:
             name: bugbug update annotate hook
             description: bugbug update annotate hook
-            owner: ${user}@users.noreply.github.com
+            owner: mcastelluccio@mozilla.com
             source: ${repository}/raw/${head_rev}/.taskcluster.yml
 
       - $if: 'tasks_for == "github-push" && head_branch[:10] == "refs/tags/"'
@@ -339,7 +369,7 @@ tasks:
           metadata:
             name: bugbug update data hook
             description: bugbug update data hook
-            owner: ${user}@users.noreply.github.com
+            owner: mcastelluccio@mozilla.com
             source: ${repository}/raw/${head_rev}/.taskcluster.yml
 
       - $if: 'tasks_for == "github-push" && head_branch[:10] == "refs/tags/"'
@@ -371,7 +401,7 @@ tasks:
           metadata:
             name: bugbug update check hook
             description: bugbug update check hook
-            owner: ${user}@users.noreply.github.com
+            owner: mcastelluccio@mozilla.com
             source: ${repository}/raw/${head_rev}/.taskcluster.yml
 
       - $if: 'tasks_for == "github-push" && head_branch[:10] == "refs/tags/"'
@@ -403,5 +433,5 @@ tasks:
           metadata:
             name: bugbug update classify patch hook
             description: bugbug update classify patch hook
-            owner: ${user}@users.noreply.github.com
+            owner: mcastelluccio@mozilla.com
             source: ${repository}/raw/${head_rev}/.taskcluster.yml

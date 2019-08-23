@@ -34,7 +34,7 @@
             },
             "command": [
                 "/usr/local/bin/python3",
-                "/code/spawn_data_pipeline.py",
+                "/code/spawn_pipeline.py",
                 "/code/annotate-pipeline.yml"
             ],
             "image": "mozilla/bugbug-spawn-pipeline",
@@ -49,8 +49,7 @@
         ],
         "schedulerId": "-",
         "scopes": [
-            "assume:hook-id:project-relman/bugbug-annotate",
-            "secrets:get:project/relman/bugbug/production"
+            "assume:hook-id:project-relman/bugbug-annotate"
         ],
         "tags": {},
         "workerType": "taskcluster-generic"

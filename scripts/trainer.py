@@ -3,69 +3,67 @@
 import argparse
 import json
 import os
+import sys
 from logging import INFO, basicConfig, getLogger
-from urllib.request import urlretrieve
 
-import zstandard
-
-from bugbug import get_bugbug_version, model
+from bugbug import bugzilla, db, model, repository
 from bugbug.models import get_model_class
-from bugbug.utils import CustomJsonEncoder
+from bugbug.utils import CustomJsonEncoder, zstd_compress
+
+MODELS_WITH_TYPE = ("component",)
+HISTORICAL_SUPPORTED_TASKS = (
+    "defect",
+    "bugtype",
+    "defectenhancementtask",
+    "regression",
+)
 
 basicConfig(level=INFO)
 logger = getLogger(__name__)
 
-BASE_URL = "https://index.taskcluster.net/v1/task/project.relman.bugbug.data_{}.{}/artifacts/public"
-
 
 class Trainer(object):
-    def decompress_file(self, path):
-        dctx = zstandard.ZstdDecompressor()
-        with open(f"{path}.zst", "rb") as input_f:
-            with open(path, "wb") as output_f:
-                dctx.copy_stream(input_f, output_f)
-        assert os.path.exists(path), "Decompressed file exists"
-
-    def compress_file(self, path):
-        cctx = zstandard.ZstdCompressor()
-        with open(path, "rb") as input_f:
-            with open(f"{path}.zst", "wb") as output_f:
-                cctx.copy_stream(input_f, output_f)
-
-    def download_db(self, db_type):
-        path = f"data/{db_type}.json"
-        formatted_base_url = BASE_URL.format(db_type, f"v{get_bugbug_version()}")
-        url = f"{formatted_base_url}/{db_type}.json.zst"
-        logger.info(f"Downloading {db_type} database from {url} to {path}.zst")
-        urlretrieve(url, f"{path}.zst")
-        assert os.path.exists(f"{path}.zst"), "Downloaded file exists"
-        logger.info(f"Decompressing {db_type} database")
-        self.decompress_file(path)
-
-    def go(self, model_name, limit=None, download_db=True):
+    def go(self, args):
         # Download datasets that were built by bugbug_data.
         os.makedirs("data", exist_ok=True)
 
-        model_class = get_model_class(model_name)
+        if args.classifier != "default":
+            assert (
+                args.model in MODELS_WITH_TYPE
+            ), f"{args.classifier} is not a valid classifier type for {args.model}"
 
-        if issubclass(model_class, model.BugModel) or issubclass(
-            model_class, model.BugCoupleModel
+            model_name = f"{args.model}_{args.classifier}"
+        else:
+            model_name = args.model
+
+        model_class = get_model_class(model_name)
+        if args.model in HISTORICAL_SUPPORTED_TASKS:
+            model_obj = model_class(args.lemmatization, args.historical)
+        elif args.model == "duplicate":
+            model_obj = model_class(
+                args.training_set_size, args.lemmatization, args.cleanup_urls
+            )
+        else:
+            model_obj = model_class(args.lemmatization)
+
+        if (
+            isinstance(model_obj, model.BugModel)
+            or isinstance(model_obj, model.BugCoupleModel)
+            or (hasattr(model_obj, "bug_data") and model_obj.bug_data)
         ):
-            if download_db:
-                self.download_db("bugs")
+            if args.download_db:
+                db.download(bugzilla.BUGS_DB)
             else:
                 logger.info("Skipping download of the bug database")
 
-        if issubclass(model_class, model.CommitModel):
-            if download_db:
-                self.download_db("commits")
+        if isinstance(model_obj, model.CommitModel):
+            if args.download_db:
+                db.download(repository.COMMITS_DB)
             else:
                 logger.info("Skipping download of the commit database")
 
         logger.info(f"Training *{model_name}* model")
-
-        model_obj = model_class()
-        metrics = model_obj.train(limit=limit)
+        metrics = model_obj.train(limit=args.limit)
 
         # Save the metrics as a file that can be uploaded as an artifact.
         metric_file_path = "metrics.json"
@@ -76,12 +74,12 @@ class Trainer(object):
 
         model_file_name = f"{model_name}model"
         assert os.path.exists(model_file_name)
-        self.compress_file(model_file_name)
+        zstd_compress(model_file_name)
 
         logger.info(f"Model compressed")
 
 
-def main():
+def parse_args(args):
     description = "Train the models"
     parser = argparse.ArgumentParser(description=description)
 
@@ -97,8 +95,42 @@ def main():
         dest="download_db",
         help="Do not download databases, uses whatever is on disk",
     )
+    parser.add_argument(
+        "--lemmatization",
+        help="Perform lemmatization (using spaCy)",
+        action="store_true",
+    )
+    parser.add_argument(
+        "--training-set-size",
+        nargs="?",
+        default=14000,
+        type=int,
+        help="The size of the training set for the duplicate model",
+    )
+    parser.add_argument(
+        "--disable-url-cleanup",
+        help="Don't cleanup urls when training the duplicate model",
+        dest="cleanup_urls",
+        default=True,
+        action="store_false",
+    )
+    parser.add_argument(
+        "--classifier",
+        help="Type of the classifier. Only used for component classification.",
+        choices=["default", "nn"],
+        default="default",
+    )
+    parser.add_argument(
+        "--historical",
+        help="""Analyze historical bugs. Only used for defect, bugtype,
+                defectenhancementtask and regression tasks.""",
+        action="store_true",
+    )
+    return parser.parse_args(args)
 
-    args = parser.parse_args()
+
+def main():
+    args = parse_args(sys.argv[1:])
 
     retriever = Trainer()
-    retriever.go(args.model, args.limit, args.download_db)
+    retriever.go(args)
